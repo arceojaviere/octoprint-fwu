@@ -1,4 +1,4 @@
-ARG PYTHON_BASE_IMAGE=2.7-slim-buster
+ARG PYTHON_BASE_IMAGE=3.8.2-slim-buster
 
 FROM buildpack-deps:curl AS ffmpeg
 RUN apt-get update && apt-get install -y xz-utils
@@ -54,22 +54,23 @@ LABEL description="The snappy web interface for your 3D printer"
 LABEL authors="longlivechief <chief@hackerhappyhour.com>, badsmoke <dockerhub@badcloud.eu>"
 LABEL issues="github.com/OcotPrint/docker/issues"
 
-RUN apt-get update && apt-get install -y build-essential
-
-RUN groupadd --gid 1000 octoprint \
-  && useradd --uid 1000 --gid octoprint -G dialout --shell /bin/bash --create-home octoprint
+RUN apt-get update && apt-get install -y build-essential avrdude && apt-get clean && rm -rf /var/cache/apt/*
 
 #Install Octoprint, ffmpeg, and cura engine
 COPY --from=compiler /opt/venv /opt/venv
 COPY --from=ffmpeg /opt /opt/ffmpeg
 COPY --from=cura-compiler /opt/build /opt/cura
 
-RUN chown -R octoprint:octoprint /opt/venv
+RUN groupadd --gid 1000 octoprint \
+  && useradd --uid 1000 --gid octoprint -G dialout --shell /bin/bash --create-home octoprint \
+  && chown -R octoprint:octoprint /opt/venv
+
 ENV PATH="/opt/venv/bin:/opt/ffmpeg:/opt/cura:$PATH"
 
 EXPOSE 5000
 COPY docker-entrypoint.sh /usr/local/bin/
 USER octoprint
 VOLUME /home/octoprint
+RUN pip install "https://github.com/OctoPrint/OctoPrint-FirmwareUpdater/archive/master.zip"
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["octoprint", "serve"]
