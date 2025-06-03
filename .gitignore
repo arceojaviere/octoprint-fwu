@@ -1,6 +1,2 @@
-config/data
-config/generated
-config/logs
-config/timelapse
-config/uploads
-buildtest
+/.build
+/.cache

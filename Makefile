@@ -1,45 +1,52 @@
-#import config.
-# You can change the default config with `make cnf="config_special.env" build`
-cnf ?= env.mk
-include $(cnf)
-CACHE = $(REGISTRY)/$(IMAGE):cache
-IMG = $(REGISTRY)/$(IMAGE)
-IMG_TAG?=latest
+builddir=.build
+cachedir=.cache
+octoprint_ref?= $(shell ./scripts/version.sh "OctoPrint/OctoPrint")
+platforms?="linux/arm/v7,linux/arm64,linux/amd64"
 
-OCTOPRINT_VERSION?= $(shell ./scripts/version.sh "OctoPrint/OctoPrint")
-
-.DEFAULT_GOAL := build
-
-clean:
-	podman stop buildkit && docker rm buildkit
-
-install: ./scripts/install.sh
-	
-binfmt: 
-	@podman run --rm --privileged docker/binfmt:a7996909642ee92942dcd6cff44b9b95f08dad64
-
-prepare: 
-	@podman buildx create --use
+.PHONY: test
 
 build:
-	@echo '[default]: building local octoprint image with all default options'
-	@podman build -t octoprint .
+	docker-compose -f test/docker-compose.yml build
 
+down:
+	docker-compose -f test/docker-compose.yml down
 
-buildx:
-	@echo '[buildx]: building image: ${IMG}:${IMG_TAG} for all architectures'
-	@podman buildx build --platform linux/amd64,linux/arm64,linux/arm/v7 \
-		--cache-from ${CACHE} \
-		--cache-to	${CACHE} \
-		--build-arg PYTHON_BASE_IMAGE=$(PYTHON_BASE_IMAGE) \
-		--build-arg tag=${OCTOPRINT_VERSION} \
-		--progress plain -t ${IMG}:${IMG_TAG} .
+up:
+	docker-compose -f test/docker-compose.yml up
 
-buildx-push:
-	@echo '[buildx]: building and pushing images: ${IMG}:${IMG_TAG} for all supported architectures'
-	podman buildx build --push --platform linux/arm64,linux/amd64,linux/arm/v7 \
-		--cache-from ${CACHE} \
-		--cache-to	${CACHE} \
-		--build-arg PYTHON_BASE_IMAGE=$(PYTHON_BASE_IMAGE) \
-		--build-arg tag=${OCTOPRINT_VERSION} \
-		--progress plain -t ${IMG}:${IMG_TAG} .
+clean:
+	docker-compose -f test/docker-compose.yml down --rmi local -v
+	rm -rf ${builddir}
+
+setup-multi-arch:
+	docker run --privileged --rm tonistiigi/binfmt --install arm64,arm/v7,amd64
+
+test:
+	./scripts/buildx_check.sh
+	@echo '[buildx]: building .Dockerfile for all supported architectures and caching locally'
+	mkdir -p ${cachedir} ${builddir}
+	docker buildx build \
+		--platform ${platforms} \
+		--cache-from type=registry,ref=docker.io/octoprint/octoprint:${octoprint_ref} \
+		--cache-from type=local,src=${cachedir} \
+		--cache-to type=local,dest=${cachedir} \
+		--build-arg octoprint_ref=${octoprint_ref} \
+		--output type=local,dest=${builddir} \
+		--progress tty -t octoprint/octoprint:test .
+
+e2e:
+	@echo '[buildx]: building with test structures and running e2e tests'
+	docker build \
+		--secret id=password,src=./test/password.txt \
+		--file ./test/Dockerfile \
+		--progress tty -t octoprint/octoprint:e2e ./test
+	docker-compose -f test/e2e-compose.yml up	
+
+build-minimal:
+	docker build -t octoprint/octoprint:minimal -f minimal/Dockerfile --build-arg octoprint_ref=${octorprint_ref} ./minimal
+
+test-minimal:
+	docker run -it --name octoprint_minimal -p 55000:5000 octoprint/octoprint:minimal
+
+clean-minimal:	
+	docker rm octoprint_minimal
